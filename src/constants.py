@@ -1,4 +1,3 @@
-from datetime import datetime
 import os
 
 from dotenv import load_dotenv
@@ -21,6 +20,8 @@ FONT_PATH = os.path.join(BASE_DIR, 'fonts', 'Arial.ttf')
 
 NUM_SEARCH_RESULTS = 15
 MAX_RESEARCH_STEPS = 5
+MAX_BATCH_ITERATIONS = 5
+MAX_QUERIES_PER_BATCH = 10
 
 MAX_HISTORY = 20
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
@@ -61,13 +62,11 @@ SUMMARIZE_SEARCH_PROMPT_TEMPLATE = (
 
 EXPAND_USER_TASK_PROMPT_TEMPLATE = (
     'Current date: {current_date}\n'
-    'Analyze and expand the user\'s input to a clear task plan with steps:\n'
-    '"{user_input}"\n'
-    'Provide a detailed description of the task in the same language as the input, focusing on '
-    'steps needed to make a deep web search on the topic.\n'
-    'Generate the plan as a numbered list (e.g., "1. Do X", "2. Do Y").\n'
-    'The last step must be "summarize".\n'
-    'If the query implies a need for current data (e.g., "current size"), prioritize recent sources.'
+    'User query: "{user_input}"\n'
+    'Generate a concise research plan as a numbered list of steps (e.g., "1. Do X\n2. Do Y") '
+    'to address the query through web searches. '
+    'Focus on actionable steps, ending with "Summarize findings". '
+    'Keep it in the same language as the input.'
 )
 
 NEXT_QUERY_PROMPT_TEMPLATE = (
@@ -96,7 +95,43 @@ SUMMARIZE_STEP_PROMPT_TEMPLATE = (
 SUMMARIZE_RESEARCH_PROMPT_TEMPLATE = (
     'Summarize the following research task:\n'
     'Initial query: {initial_query}\n'
-    'Expanded query: {expanded_query}\n'
-    'Steps and results: {steps}\n'
+    'Plan: {plan}\n'  # Replace expanded_query with plan
+    'Iterations: {steps}\n'
     'Provide a comprehensive summary in the same language as the query.'
+)
+
+INITIAL_BATCH_QUERIES_PROMPT_TEMPLATE = (
+    'Current date: {current_date}\n'
+    'Initial query: "{initial_query}"\n'
+    'Plan: "{plan}"\n'
+    'Generate a list of up to {max_queries} web search queries in JSON format '
+    '(e.g., ["query1", "query2"]) based on the plan to gather relevant information.'
+)
+
+NEXT_BATCH_QUERIES_PROMPT_TEMPLATE = (
+    'Current date: {current_date}\n'
+    'Initial query: "{initial_query}"\n'
+    'Plan: "{plan}"\n'
+    'Previous iterations: {iterations_json}\n'
+    'Generate a list of up to {max_queries} web search queries in JSON format '
+    '(e.g., ["query1", "query2"]) based on the plan and previous results to continue the research.'
+)
+
+COMPLETION_CHECK_PROMPT_TEMPLATE = (
+    'Current date: {current_date}\n'
+    'Initial query: "{initial_query}"\n'
+    'Plan: "{plan}"\n'
+    'Iterations: {iterations_json}\n'
+    'Is the task complete? Return "1" or "2" followed by a brief reason '
+    '(e.g., "1. More data needed" or "2. Sufficient info gathered").'
+)
+
+CONCLUSION_PROMPT_TEMPLATE = (
+    'Current date: {current_date}\n'
+    'Initial query: "{initial_query}"\n'
+    'Plan: "{plan}"\n'
+    'Iterations: {iterations_json}\n'
+    'Final summary: "{final_summary}"\n'
+    'Write a concise conclusion (not a summary) addressing the query, '
+    'highlighting key insights, implications, or final judgments based on the research.'
 )

@@ -7,7 +7,8 @@ from constants import (
     ANALYZE_PROMPT_TEMPLATE, REFINE_SEARCH_QUERY_TEMPLATE,
     OLLAMA_API_URL, OLLAMA_MODEL, EXPAND_USER_TASK_PROMPT_TEMPLATE,
     NEXT_QUERY_PROMPT_TEMPLATE, REFINE_QUERY_PROMPT_TEMPLATE,
-    SUMMARIZE_STEP_PROMPT_TEMPLATE, SUMMARIZE_RESEARCH_PROMPT_TEMPLATE
+    SUMMARIZE_STEP_PROMPT_TEMPLATE, SUMMARIZE_RESEARCH_PROMPT_TEMPLATE,
+    MAX_QUERIES_PER_BATCH
 )
 
 def ollama_generate(prompt):
@@ -100,3 +101,22 @@ def summarize_research(initial_query, expanded_query, steps):
     response = ollama_generate(prompt)
     summary = response.get('response', '').strip()
     return summary
+
+def generate_batch_queries(prompt):
+    """Generate a batch of web search queries using Ollama."""
+    response = ollama_generate(prompt)
+    query_text = response.get('response', '').strip()
+    try:
+        queries = json.loads(query_text)
+        if isinstance(queries, list):
+            return queries[:MAX_QUERIES_PER_BATCH]  # Cap at 10
+    except json.JSONDecodeError:
+        queries = re.findall(r'"([^"]*)"', query_text)
+        return queries[:MAX_QUERIES_PER_BATCH] if queries else []  # Cap at 10
+    return []
+
+def check_completion(prompt):
+    """Check if the research task is complete using Ollama."""
+    response = ollama_generate(prompt)
+    complete_text = response.get('response', '2. Unknown reason').strip()
+    return complete_text

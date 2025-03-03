@@ -7,9 +7,14 @@ from datetime import datetime
 
 from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler
-from constants import RESEARCH_JSON_FILE, MAX_RESEARCH_STEPS, POWER_USERS
+from constants import (
+    RESEARCH_JSON_FILE, MAX_BATCH_ITERATIONS, POWER_USERS,
+    INITIAL_BATCH_QUERIES_PROMPT_TEMPLATE, NEXT_BATCH_QUERIES_PROMPT_TEMPLATE,
+    COMPLETION_CHECK_PROMPT_TEMPLATE, SUMMARIZE_STEP_PROMPT_TEMPLATE, MAX_QUERIES_PER_BATCH,
+    SUMMARIZE_RESEARCH_PROMPT_TEMPLATE
+)
 from utils.ollama_utils import (
-    generate_plan, generate_next_query, refine_query, summarize_step, summarize_research
+    generate_plan, generate_batch_queries, check_completion, ollama_generate
 )
 from utils.search_utils import perform_search
 from utils.pdf_utils import generate_pdf
@@ -39,82 +44,105 @@ async def research(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     research_id = str(uuid.uuid4())
-    current_date = datetime.now().strftime('%Y-%m-%d')  # Set today's date (e.g., "2025-03-03")
-    expanded_query = generate_plan(query, current_date)  # Pass current_date
-    plan = expanded_query
-    plan_steps = parse_plan(plan)
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    plan = generate_plan(query, current_date)  # Only generate plan
 
     task_state = {
         'research_id': research_id,
         'user_id': user_id,
-        'current_date': current_date,  # Add current date to JSON
+        'current_date': current_date,
         'initial_user_query': query,
-        'expanded_user_query': expanded_query,
-        'plan': plan,
-        'steps': [],
-        'next_query': '',
-        'summary': None,
+        'plan': plan,  # Single field for the plan
+        'iterations': [],
+        'next_queries': [],
+        'complete_status': None,
+        'final_summary': None,
         'status': 'pending'
     }
+
+    # Generate first batch of queries
+    prompt = INITIAL_BATCH_QUERIES_PROMPT_TEMPLATE.format(
+        current_date=current_date,
+        initial_query=query,
+        plan=plan,
+        max_queries=MAX_QUERIES_PER_BATCH
+    )
+    task_state['next_queries'] = generate_batch_queries(prompt)
     save_task_state(task_state)
 
     await update.message.reply_text('Starting research task...')
     context.user_data['current_task_id'] = research_id
-    asyncio.create_task(run_research_task(update, context, task_state, plan_steps))
+    asyncio.create_task(run_research_task(update, context, task_state))
 
-async def run_research_task(update: Update, context, task_state, plan_steps):
-    """Run the research task in the background."""
+async def run_research_task(update: Update, context, task_state):
+    """Run the research task in the background with batch iterations."""
     try:
-        step_number = 1
-        while True:
-            if len(task_state['steps']) >= MAX_RESEARCH_STEPS:
-                task_state['next_query'] = 'complete'
-                await update.message.reply_text('Max steps reached. Summarizing...')
+        iteration_number = 1
+        while iteration_number <= MAX_BATCH_ITERATIONS:
+            # Batch search
+            queries = task_state['next_queries']
+            if not queries:
+                await update.message.reply_text(f'Iteration {iteration_number}: No queries generated.')
                 break
 
-            if step_number <= len(plan_steps):
-                step_desc = plan_steps[step_number - 1]
-            else:
-                step_desc = 'Additional step based on previous results'
+            await update.message.reply_text(f'Iteration {iteration_number}: Searching {len(queries)} queries...')
+            batch_results = []
+            for query in queries:
+                await update.message.reply_text(f'Searching: "{query}"')
+                raw_results = perform_search(query)
+                if not raw_results or raw_results == 'Failed to retrieve search results.':
+                    raw_results = 'No results found.'
+                batch_results.append({'query': query, 'raw_results': raw_results})
 
-            next_query = generate_next_query(
-                task_state['plan'], task_state['steps'], step_number, task_state['current_date']
-            )
-            task_state['next_query'] = next_query
+            # Summarize batch
+            batch_json = json.dumps(batch_results, indent=2)
+            prompt = SUMMARIZE_STEP_PROMPT_TEMPLATE.format(query='batch queries', raw_results=batch_json)
+            batch_summary = ollama_generate(prompt).get('response', '').strip()
 
-            if next_query.lower() == 'complete':
-                break
-
-            await update.message.reply_text(f'Doing step {step_number}: {next_query}')
-
-            raw_results = perform_search(next_query)
-            if not raw_results or raw_results == 'Failed to retrieve search results.':
-                for _ in range(2):
-                    next_query = refine_query(next_query)
-                    await update.message.reply_text(f'Refining query: {next_query}')
-                    raw_results = perform_search(next_query)
-                    if raw_results and raw_results != 'Failed to retrieve search results.':
-                        break
-                else:
-                    raw_results = 'No results found after retries.'
-
-            summary = summarize_step(next_query, raw_results)
-
-            task_state['steps'].append({
-                'step_number': step_number,
-                'description': step_desc,
-                'query': next_query,
-                'raw_results': raw_results,
-                'summary': summary
+            task_state['iterations'].append({
+                'iteration_number': iteration_number,
+                'queries': batch_results,
+                'summary': batch_summary
             })
             save_task_state(task_state)
-            step_number += 1
 
-        task_state['summary'] = summarize_research(
-            task_state['initial_user_query'],
-            task_state['expanded_user_query'],
-            task_state['steps']
+            # Check completion
+            iterations_json = json.dumps(task_state['iterations'], indent=2)
+            prompt = COMPLETION_CHECK_PROMPT_TEMPLATE.format(
+                current_date=task_state['current_date'],
+                initial_query=task_state['initial_user_query'],
+                plan=task_state['plan'],
+                iterations_json=iterations_json
+            )
+            complete_response = check_completion(prompt)
+            task_state['complete_status'] = complete_response
+            decision = int(complete_response[0])  # Parse first digit (1 or 2)
+
+            if decision == 2 or iteration_number == MAX_BATCH_ITERATIONS:
+                if iteration_number == MAX_BATCH_ITERATIONS:
+                    await update.message.reply_text('Max iterations reached.')
+                break
+
+            # Generate next batch if continuing
+            prompt = NEXT_BATCH_QUERIES_PROMPT_TEMPLATE.format(
+                current_date=task_state['current_date'],
+                initial_query=task_state['initial_user_query'],
+                plan=task_state['plan'],
+                iterations_json=iterations_json,
+                max_queries=MAX_QUERIES_PER_BATCH
+            )
+            task_state['next_queries'] = generate_batch_queries(prompt)
+            save_task_state(task_state)
+            iteration_number += 1
+
+        # Final summary and PDF
+        iterations_json = json.dumps(task_state['iterations'], indent=2)
+        prompt = SUMMARIZE_RESEARCH_PROMPT_TEMPLATE.format(
+            initial_query=task_state['initial_user_query'],
+            plan=task_state['plan'],  # Use plan instead of expanded_query
+            steps=iterations_json
         )
+        task_state['final_summary'] = ollama_generate(prompt).get('response', '').strip()
         task_state['status'] = 'complete'
         save_task_state(task_state)
 
