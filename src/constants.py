@@ -18,6 +18,7 @@ NUM_SEARCH_RESULTS = 15
 MAX_HISTORY = 20
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 
+
 AGENT_PRECONTEXT = (
     'You are AI agent WebSearchBuddy, an intelligent agent '
     'that can answer questions directly or search the web.'
@@ -25,10 +26,23 @@ AGENT_PRECONTEXT = (
 
 ANALYZE_PROMPT_TEMPLATE = (
     'Analyze the user\'s prompt:\n"{prompt}"\n'
-    '1. Can be answered directly by AI\n'
-    '2. Requires searching the web for information\n'
+    '1. Can be answered directly by AI, like small talk or theoretical discussion\n'
+    '2. Requires searching the web for information'
+    'If the question refers to some current events or "сейчас, недавно", '
+    'Or the user is asking something you dont know\n'
+    'This is definitely 2 - we need to search\n'
     'Return only a single digit, no explanation, choose: (1 or 2)'
 )
+
+REFINE_SEARCH_QUERY_TEMPLATE = (
+    'Based on the conversation context and the user\'s latest query, '
+    'generate a concise and accurate web search query (max 50 words). '
+    'Correct any errors in the user\'s query and make it clear and precise. '
+    'Conversation context:\n{context}\n'
+    'User\'s latest query:\n{user_query}\n'
+    'Output only the refined search query, no explanations.'
+)
+
 
 SUMMARIZE_SEARCH_PROMPT_TEMPLATE = (
     'Based on the following search results, provide a detailed '

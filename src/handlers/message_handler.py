@@ -7,7 +7,7 @@ from constants import (
     MAX_HISTORY, AGENT_PRECONTEXT, CHAT_DIR,
     SUMMARIZE_SEARCH_PROMPT_TEMPLATE, TELEGRAM_MAX_MESSAGE_LENGTH
 )
-from utils.ollama_utils import ollama_generate, analyze_prompt
+from utils.ollama_utils import ollama_generate, analyze_prompt, refine_search_query
 from utils.search_utils import perform_search
 
 
@@ -36,7 +36,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         conversation = []
     user_message = update.message.text
-    category = analyze_prompt(user_message)
+    conversation.append(f'user: {user_message}')
+    save_conversation(conversation, chat_file)
+
+    # Analyze prompt with conversation context
+    category = analyze_prompt(user_message, conversation)
 
     async def reply_and_log(message):
         conversation.append(f'agent: {message}')
@@ -44,8 +48,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_in_chunks(update.message.reply_text, message)
 
     if category == 1:
-        conversation.append(f'user: {user_message}')
-        save_conversation(conversation, chat_file)
         try:
             history_str = '\n'.join(conversation)
             prompt = f'{AGENT_PRECONTEXT}\n{history_str}\nagent:'
@@ -56,9 +58,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logging.error(f'Failed to process with Ollama: {str(e)}')
             await reply_and_log('Sorry, I couldn’t process that due to an error.')
     elif category == 2:
+        await reply_and_log('Need to search the web')
         try:
-            await reply_and_log('Need to search the web')
-            search_results = perform_search(user_message)
+            # Refine the user's query using Ollama
+            refined_query = refine_search_query(user_message, conversation)
+            logging.info(f'Refined search query: {refined_query}')
+            search_results = perform_search(refined_query)
             if search_results and search_results != 'Failed to retrieve search results.':
                 prompt = SUMMARIZE_SEARCH_PROMPT_TEMPLATE.format(
                     user_query=user_message,
