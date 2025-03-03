@@ -36,11 +36,11 @@ ANALYZE_PROMPT_TEMPLATE = (
 
 REFINE_SEARCH_QUERY_TEMPLATE = (
     'Based on the conversation context and the user\'s latest query, '
-    'generate a concise and accurate web search query (max 50 words). '
+    'generate a concise and accurate web search query (max 10 words). '
     'Correct any errors in the user\'s query and make it clear and precise. '
     'Conversation context:\n{context}\n'
     'User\'s latest query:\n{user_query}\n'
-    'Output only the refined search query, no explanations.'
+    'Output only the refined search query, no explanations, just search query.'
 )
 
 
@@ -48,5 +48,6 @@ SUMMARIZE_SEARCH_PROMPT_TEMPLATE = (
     'Based on the following search results, provide a detailed '
     'summary answering the user\'s query: "{user_query}"\n\n'
     'Search Results:\n{search_results}\n\n'
+    'If user\'s query is in russian, make summary in russian'
     'Summary:'
 )

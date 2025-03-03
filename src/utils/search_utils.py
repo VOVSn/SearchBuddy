@@ -6,7 +6,8 @@ from constants import SEARCH_API_URL, NUM_SEARCH_RESULTS
 
 def perform_search(query):
     """Perform a web search and return formatted results."""
-    url = f'{SEARCH_API_URL}?q={urllib.parse.quote(query)}&format=json'
+    url = (f'{SEARCH_API_URL}?q={urllib.parse.quote(query)}'
+           f'&format=json&language=en')
     try:
         response = requests.get(url)
         response.raise_for_status()
