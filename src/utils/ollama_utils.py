@@ -1,7 +1,14 @@
+import json
+import re
 import requests
 import logging
-from constants import OLLAMA_API_URL, OLLAMA_MODEL, ANALYZE_PROMPT_TEMPLATE, REFINE_SEARCH_QUERY_TEMPLATE
 
+from constants import (
+    ANALYZE_PROMPT_TEMPLATE, REFINE_SEARCH_QUERY_TEMPLATE,
+    OLLAMA_API_URL, OLLAMA_MODEL, EXPAND_USER_TASK_PROMPT_TEMPLATE,
+    NEXT_QUERY_PROMPT_TEMPLATE, REFINE_QUERY_PROMPT_TEMPLATE,
+    SUMMARIZE_STEP_PROMPT_TEMPLATE, SUMMARIZE_RESEARCH_PROMPT_TEMPLATE
+)
 
 def ollama_generate(prompt):
     """Generate a response using the Ollama API."""
@@ -51,3 +58,45 @@ def refine_search_query(user_query, conversation=None):
     response = ollama_generate(prompt)
     refined_query = response.get('response', user_query).strip()
     return refined_query if refined_query else user_query
+
+def generate_plan(user_input, current_date):
+    """Generate a research plan using Ollama."""
+    prompt = EXPAND_USER_TASK_PROMPT_TEMPLATE.format(user_input=user_input, current_date=current_date)
+    response = ollama_generate(prompt)
+    plan = response.get('response', '').strip()
+    return plan
+
+def generate_next_query(plan, steps, step_number, current_date):
+    """Generate the next web search query using Ollama."""
+    steps_json = json.dumps(steps, indent=2)
+    prompt = NEXT_QUERY_PROMPT_TEMPLATE.format(
+        plan=plan, steps=steps_json, step_number=step_number, current_date=current_date
+    )
+    response = ollama_generate(prompt)
+    next_query = response.get('response', '').strip()
+    match = re.search(r'"([^"]*)"', next_query)
+    return match.group(1) if match else next_query
+
+def refine_query(query):
+    """Refine the query if no results were found."""
+    prompt = REFINE_QUERY_PROMPT_TEMPLATE.format(query=query)
+    response = ollama_generate(prompt)
+    refined_query = response.get('response', '').strip()
+    return refined_query
+
+def summarize_step(query, raw_results):
+    """Summarize the raw search results for a step."""
+    prompt = SUMMARIZE_STEP_PROMPT_TEMPLATE.format(query=query, raw_results=raw_results)
+    response = ollama_generate(prompt)
+    summary = response.get('response', '').strip()
+    return summary
+
+def summarize_research(initial_query, expanded_query, steps):
+    """Summarize the entire research task."""
+    steps_json = json.dumps(steps, indent=2)
+    prompt = SUMMARIZE_RESEARCH_PROMPT_TEMPLATE.format(
+        initial_query=initial_query, expanded_query=expanded_query, steps=steps_json
+    )
+    response = ollama_generate(prompt)
+    summary = response.get('response', '').strip()
+    return summary

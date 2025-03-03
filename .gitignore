@@ -1,6 +1,7 @@
 .env
 venv
 *.log
+research/
 chats/
 tasks/
 __pycache__

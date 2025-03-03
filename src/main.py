@@ -10,6 +10,7 @@ from handlers.start_handler import start_handler
 from handlers.delete_handler import delete_handler
 from handlers.model_handler import model_handler
 from handlers.error_handler import error_handler
+from handlers.research_handler import research_handler
 from utils.logging_confg import configure_logging
 
 
@@ -18,6 +19,7 @@ HANDLERS = [
     delete_handler,
     model_handler,
     message_handler,
+    research_handler,
 ]
 
 
