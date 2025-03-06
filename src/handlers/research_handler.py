@@ -20,11 +20,11 @@ from utils.search_utils import perform_search
 from utils.pdf_utils import generate_pdf
 
 
-def parse_plan(plan):
-    """Parse the plan string into a list of numbered steps."""
-    # Split by lines and filter for numbered steps (e.g., "1. Do X")
-    steps = [line.strip() for line in plan.split('\n') if re.match(r'^\d+\.\s', line)]
-    return steps
+# def parse_plan(plan):
+#     """Parse the plan string into a list of numbered steps."""
+#     # Split by lines and filter for numbered steps (e.g., "1. Do X")
+#     steps = [line.strip() for line in plan.split('\n') if re.match(r'^\d+\.\s', line)]
+#     return steps
 
 
 async def research(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -45,14 +45,14 @@ async def research(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     research_id = str(uuid.uuid4())
     current_date = datetime.now().strftime('%Y-%m-%d')
-    plan = generate_plan(query, current_date)  # Only generate plan
+    plan = generate_plan(query, current_date)
 
     task_state = {
         'research_id': research_id,
         'user_id': user_id,
         'current_date': current_date,
         'initial_user_query': query,
-        'plan': plan,  # Single field for the plan
+        'plan': plan,
         'iterations': [],
         'next_queries': [],
         'complete_status': None,
@@ -79,7 +79,6 @@ async def run_research_task(update: Update, context, task_state):
     try:
         iteration_number = 1
         while iteration_number <= MAX_BATCH_ITERATIONS:
-            # Batch search
             queries = task_state['next_queries']
             if not queries:
                 await update.message.reply_text(f'Iteration {iteration_number}: No queries generated.')
@@ -116,14 +115,13 @@ async def run_research_task(update: Update, context, task_state):
             )
             complete_response = check_completion(prompt)
             task_state['complete_status'] = complete_response
-            decision = int(complete_response[0])  # Parse first digit (1 or 2)
+            decision = int(complete_response[0])
 
             if decision == 2 or iteration_number == MAX_BATCH_ITERATIONS:
                 if iteration_number == MAX_BATCH_ITERATIONS:
                     await update.message.reply_text('Max iterations reached.')
                 break
 
-            # Generate next batch if continuing
             prompt = NEXT_BATCH_QUERIES_PROMPT_TEMPLATE.format(
                 current_date=task_state['current_date'],
                 initial_query=task_state['initial_user_query'],
@@ -139,7 +137,7 @@ async def run_research_task(update: Update, context, task_state):
         iterations_json = json.dumps(task_state['iterations'], indent=2)
         prompt = SUMMARIZE_RESEARCH_PROMPT_TEMPLATE.format(
             initial_query=task_state['initial_user_query'],
-            plan=task_state['plan'],  # Use plan instead of expanded_query
+            plan=task_state['plan'],
             steps=iterations_json
         )
         task_state['final_summary'] = ollama_generate(prompt).get('response', '').strip()
@@ -157,9 +155,9 @@ async def run_research_task(update: Update, context, task_state):
         archive_completed_task()
 
 def save_task_state(state):
-    """Save the task state to the JSON file."""
-    with open(RESEARCH_JSON_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
+    """Save the task state to the JSON file with readable Unicode characters."""
+    with open(RESEARCH_JSON_FILE, 'w', encoding='utf-8') as f:
+        json.dump(state, f, indent=2, ensure_ascii=False)  # Disable ASCII escaping
 
 def archive_completed_task():
     """Archive the completed task JSON file."""

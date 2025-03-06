@@ -15,11 +15,11 @@ class ResearchPDF(FPDF):
         self.set_font('Arial', '', 12)
 
     def header(self):
-        self.set_font('Arial', 'B', 12)
+        self.set_font('Arial', 'B', 10)
         self.cell(0, 10, 'Research Report', 0, 1, 'C')
 
     def chapter_title(self, title):
-        self.set_font('Arial', 'B', 12)
+        self.set_font('Arial', 'B', 16)
         self.cell(0, 10, title, 0, 1, 'L')
         self.ln(2)
 
@@ -28,7 +28,7 @@ class ResearchPDF(FPDF):
         parts = re.split(r'(\*\*.*?\*\*)', body)
         for part in parts:
             if part.startswith('**') and part.endswith('**'):
-                self.set_font('Arial', 'B', 12)
+                self.set_font('Arial', 'B', 14)
                 self.write(10, part[2:-2])
                 self.set_font('Arial', '', 12)
             else:
@@ -52,13 +52,13 @@ def generate_pdf(task_state):
     )
     pdf.add_section('Introduction', intro)
 
-    # findings = ""
-    # for iteration in task_state['iterations']:
-    #     findings += f"Iteration {iteration['iteration_number']}:\n"
-    #     for q in iteration['queries']:
-    #         findings += f"Query: {q['query']}\nRaw Results: {q['raw_results'][:200]}...\n"
-    #     findings += f"Summary: {iteration['summary']}\n\n"
-    # pdf.add_section('Findings', findings)
+    findings = ""
+    for iteration in task_state['iterations']:
+        findings += f"Iteration {iteration['iteration_number']}:\n_______\n"
+        for q in iteration['queries']:
+            findings += f"\nQuery: {q['query']}\n\nRaw Results:\n\n{q['raw_results']}...\n"
+        findings += f"Summary: {iteration['summary']}\n\n"
+    pdf.add_section('Findings', findings)
 
     pdf.add_section('Summary', task_state['final_summary'])
 
