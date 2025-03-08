@@ -2,40 +2,72 @@ import os
 import json
 import uuid
 import asyncio
+import logging
 import re
 from datetime import datetime
 
 from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler
+from transliterate import translit
+
 from constants import (
-    RESEARCH_JSON_FILE, MAX_BATCH_ITERATIONS, POWER_USERS,
-    INITIAL_BATCH_QUERIES_PROMPT_TEMPLATE, NEXT_BATCH_QUERIES_PROMPT_TEMPLATE,
-    COMPLETION_CHECK_PROMPT_TEMPLATE, SUMMARIZE_STEP_PROMPT_TEMPLATE, MAX_QUERIES_PER_BATCH,
-    SUMMARIZE_RESEARCH_PROMPT_TEMPLATE
+    RESEARCH_JSON_FILE,
+    MAX_BATCH_ITERATIONS,
+    POWER_USERS,
+    RESEARCH_LOG_DIR,
+    MAX_QUERIES_PER_BATCH,
+    SUMMARY_LENGTH,
 )
 from utils.ollama_utils import (
-    generate_plan, generate_batch_queries, check_completion, ollama_generate
+    generate_plan,
+    generate_batch_queries,
+    check_completion,
+    ollama_generate,
 )
-from utils.search_utils import perform_search
 from utils.pdf_utils import generate_pdf
+from utils.prompts import (
+    INITIAL_BATCH_QUERIES_PROMPT_TEMPLATE,
+    NEXT_BATCH_QUERIES_PROMPT_TEMPLATE,
+    COMPLETION_CHECK_PROMPT_TEMPLATE,
+    SUMMARIZE_STEP_PROMPT_TEMPLATE,
+    SUMMARIZE_RESEARCH_PROMPT_TEMPLATE,
+)
+from utils.search_utils import perform_research_search
 
 
-# def parse_plan(plan):
-#     """Parse the plan string into a list of numbered steps."""
-#     # Split by lines and filter for numbered steps (e.g., "1. Do X")
-#     steps = [line.strip() for line in plan.split('\n') if re.match(r'^\d+\.\s', line)]
-#     return steps
+def sanitize_filename(query):
+    """Convert query to snake_case filename with transliteration."""
+    try:
+        # Transliterate non-Latin (e.g., Cyrillic) to Latin
+        sanitized = translit(query, 'ru', reversed=True).lower()
+    except Exception:
+        # Fallback if transliteration fails
+        sanitized = query.lower()
+    # Keep only alphanumeric chars and spaces, replace spaces with underscores
+    sanitized = re.sub(r'[^a-z0-9\s]', '', sanitized).strip()
+    return '_'.join(word for word in sanitized.split() if word)
+
+def get_unique_filename(base_name, directory, extension):
+    """Generate a unique filename with counter if needed."""
+    filename = f'research_{base_name}{extension}'
+    filepath = os.path.join(directory, filename)
+    counter = 1
+    while os.path.exists(filepath):
+        filename = f'research_{base_name}_{counter:03d}{extension}'
+        filepath = os.path.join(directory, filename)
+        counter += 1
+    return filepath
 
 
 async def research(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the /research command to start a research task."""
+    """Handle the /research command."""
     user_id = str(update.message.from_user.id)
     if user_id not in POWER_USERS.split(','):
-        await update.message.reply_text('You do not have permission to use this command.')
+        await update.message.reply_text('Permission denied.')
         return
 
     if os.path.exists(RESEARCH_JSON_FILE):
-        await update.message.reply_text('A research task is already in progress.')
+        await update.message.reply_text('Research task already in progress.')
         return
 
     query = ' '.join(context.args)
@@ -43,9 +75,18 @@ async def research(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text('Please provide a query.')
         return
 
-    research_id = str(uuid.uuid4())
+    research_id = str(uuid.uuid4())  # Keep UUID internally
     current_date = datetime.now().strftime('%Y-%m-%d')
     plan = generate_plan(query, current_date)
+    base_name = sanitize_filename(query)
+
+    # Setup logging with query-based filename
+    log_file = get_unique_filename(base_name, RESEARCH_LOG_DIR, '.log')
+    logger = logging.getLogger(research_id)
+    logger.setLevel(logging.INFO)
+    handler = logging.FileHandler(log_file, encoding='utf-8')
+    handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
+    logger.addHandler(handler)
 
     task_state = {
         'research_id': research_id,
@@ -57,10 +98,11 @@ async def research(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'next_queries': [],
         'complete_status': None,
         'final_summary': None,
-        'status': 'pending'
+        'status': 'pending',
+        'used_urls': [],
+        'base_name': base_name
     }
 
-    # Generate first batch of queries
     prompt = INITIAL_BATCH_QUERIES_PROMPT_TEMPLATE.format(
         current_date=current_date,
         initial_query=query,
@@ -72,31 +114,56 @@ async def research(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text('Starting research task...')
     context.user_data['current_task_id'] = research_id
-    asyncio.create_task(run_research_task(update, context, task_state))
+    asyncio.create_task(run_research_task(update, context, task_state, logger))
 
-async def run_research_task(update: Update, context, task_state):
-    """Run the research task in the background with batch iterations."""
+async def run_research_task(update: Update, context, task_state, logger):
+    """Run the research task with scraping."""
     try:
         iteration_number = 1
         while iteration_number <= MAX_BATCH_ITERATIONS:
             queries = task_state['next_queries']
             if not queries:
-                await update.message.reply_text(f'Iteration {iteration_number}: No queries generated.')
+                logger.info(f'Iteration {iteration_number}: No queries generated.')
+                await update.message.reply_text(f'Iteration {iteration_number}: No queries.')
                 break
 
-            await update.message.reply_text(f'Iteration {iteration_number}: Searching {len(queries)} queries...')
+            await update.message.reply_text('Searching...')
+            logger.info(f'Iteration {iteration_number}: Searching {len(queries)} queries')
             batch_results = []
             for query in queries:
-                await update.message.reply_text(f'Searching: "{query}"')
-                raw_results = perform_search(query)
-                if not raw_results or raw_results == 'Failed to retrieve search results.':
-                    raw_results = 'No results found.'
-                batch_results.append({'query': query, 'raw_results': raw_results})
+                logger.info(f'Searching: "{query}"')
+                results = await perform_research_search(query, logger)
+                if not results:
+                    logger.warning(f'No results for query: {query}')
+                    continue
 
-            # Summarize batch
-            batch_json = json.dumps(batch_results, indent=2)
-            prompt = SUMMARIZE_STEP_PROMPT_TEMPLATE.format(query='batch queries', raw_results=batch_json)
-            batch_summary = ollama_generate(prompt).get('response', '').strip()
+                for result in results:
+                    content = result['content']
+                    prompt = SUMMARIZE_STEP_PROMPT_TEMPLATE.format(
+                        query=query,
+                        raw_content=content,
+                        summary_length=SUMMARY_LENGTH
+                    )
+                    summary = ollama_generate(prompt).get('response', '').strip()
+                    batch_results.append({
+                        'query': query,
+                        'url': result['url'],
+                        'title': result['title'],
+                        'summary': summary
+                    })
+                    task_state['used_urls'].append(result['url'])
+
+            if not batch_results:
+                logger.error('No valid results in batch.')
+                raise Exception('No data retrieved for iteration.')
+
+            await update.message.reply_text('Summarizing...')
+            batch_summary_prompt = SUMMARIZE_STEP_PROMPT_TEMPLATE.format(
+                query='batch queries',
+                raw_content=json.dumps([r['summary'] for r in batch_results], indent=2),
+                summary_length=SUMMARY_LENGTH * 2
+            )
+            batch_summary = ollama_generate(batch_summary_prompt).get('response', '').strip()
 
             task_state['iterations'].append({
                 'iteration_number': iteration_number,
@@ -105,7 +172,6 @@ async def run_research_task(update: Update, context, task_state):
             })
             save_task_state(task_state)
 
-            # Check completion
             iterations_json = json.dumps(task_state['iterations'], indent=2)
             prompt = COMPLETION_CHECK_PROMPT_TEMPLATE.format(
                 current_date=task_state['current_date'],
@@ -133,34 +199,45 @@ async def run_research_task(update: Update, context, task_state):
             save_task_state(task_state)
             iteration_number += 1
 
-        # Final summary and PDF
+        await update.message.reply_text('Making conclusion...')
         iterations_json = json.dumps(task_state['iterations'], indent=2)
-        prompt = SUMMARIZE_RESEARCH_PROMPT_TEMPLATE.format(
+        final_prompt = SUMMARIZE_RESEARCH_PROMPT_TEMPLATE.format(
             initial_query=task_state['initial_user_query'],
             plan=task_state['plan'],
             steps=iterations_json
         )
-        task_state['final_summary'] = ollama_generate(prompt).get('response', '').strip()
+        task_state['final_summary'] = ollama_generate(final_prompt).get('response', '').strip()
         task_state['status'] = 'complete'
         save_task_state(task_state)
 
-        pdf_file = generate_pdf(task_state)
-        await update.message.reply_document(open(pdf_file, 'rb'), caption='Research complete!')
+        await update.message.reply_text('Generating files...')
+        pdf_file, txt_file = generate_pdf(task_state)
+        if pdf_file:
+            with open(pdf_file, 'rb') as pdf:
+                await update.message.reply_document(pdf, caption='Research complete (PDF)')
+        if txt_file:
+            with open(txt_file, 'rb') as txt:
+                await update.message.reply_document(txt, caption='Research raw text')
 
     except Exception as e:
-        await update.message.reply_text(f'Error: {str(e)}')
+        logger.error(f'Fatal error: {e}')
+        await update.message.reply_text('Error during research, see logs.')
+        with open(logger.handlers[0].baseFilename, 'rb') as log_file:
+            await update.message.reply_document(log_file, caption='Research log')
     finally:
         if 'current_task_id' in context.user_data:
             del context.user_data['current_task_id']
         archive_completed_task()
+        logger.handlers[0].close()
+        logger.removeHandler(logger.handlers[0])
 
 def save_task_state(state):
-    """Save the task state to the JSON file with readable Unicode characters."""
+    """Save task state to JSON."""
     with open(RESEARCH_JSON_FILE, 'w', encoding='utf-8') as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)  # Disable ASCII escaping
+        json.dump(state, f, indent=2, ensure_ascii=False)
 
 def archive_completed_task():
-    """Archive the completed task JSON file."""
+    """Archive completed task JSON."""
     if os.path.exists(RESEARCH_JSON_FILE):
         i = 1
         while os.path.exists(f'{RESEARCH_JSON_FILE}.{i:03d}'):

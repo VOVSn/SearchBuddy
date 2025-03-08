@@ -28,8 +28,8 @@ def main():
     try:
         configure_logging()
         logging.info('Starting the Telegram bot application')
-        if not os.path.exists(CHAT_DIR):
-            os.makedirs(CHAT_DIR)
+        # if not os.path.exists(CHAT_DIR):
+        #     os.makedirs(CHAT_DIR)
         app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
         app.add_handlers(HANDLERS)
         app.add_error_handler(error_handler)
