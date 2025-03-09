@@ -1,4 +1,3 @@
-markdown
 # WebSearchBuddy
 
 WebSearchBuddy is a comprehensive tool designed for conducting web research and generating structured reports in PDF format. It utilizes an LLM-based agent to navigate through search results, iteratively improving the understanding and documentation of user queries.
@@ -15,8 +14,8 @@ To set up WebSearchBuddy, ensure you have Python installed. Follow these steps:
 
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
-   cd WebSearchBuddy
+   git clone https://github.com/VOVSn/SearchBuddy
+   cd SearchBuddy
    ```
 
 2. Install dependencies:
@@ -51,6 +50,3 @@ Contributions are welcome! Please follow these guidelines:
 3. Write tests for any new functionality.
 4. Submit a pull request with a clear description of changes.
 
-## License
-
-WebSearchBuddy is open-source software licensed under the MIT License. See `LICENSE` file for more details.
