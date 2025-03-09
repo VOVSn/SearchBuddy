@@ -1,8 +1,10 @@
 .env
 venv
 *.log
+research/
 chats/
 tasks/
 __pycache__
 __pycache__/*
-codebase.txt
+codebase
+codecollect.py
