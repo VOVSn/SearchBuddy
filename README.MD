@@ -1,6 +1,5 @@
 # WebSearchBuddy
-
-WebSearchBuddy is a comprehensive tool designed for conducting web research and generating structured reports in PDF format. It utilizes an LLM-based agent to navigate through search results, iteratively improving the understanding and documentation of user queries.
+WebSearchBuddy is a telegram bot that uses search API for conducting web research and generating structured reports in PDF format. It utilizes an LLM-based agent to navigate through search results, iteratively improving the understanding and documentation of user queries.
 
 ## Features
 
